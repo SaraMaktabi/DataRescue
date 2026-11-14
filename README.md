@@ -8,3 +8,10 @@ diagnostic par règles + agent LLM encadré, réparation contrôlée en sandbox.
 uv venv
 .\.venv\Scripts\Activate.ps1
 uv sync
+
+
+git clone https://github.com/<ton-user>/DataRescue.git
+cd DataRescue
+uv sync                    # recrée le venv exact depuis uv.lock
+Copy-Item .env.example .env
+docker compose up -d --build
