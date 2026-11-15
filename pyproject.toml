@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "apache-airflow==2.9.2",
     "delta-spark==3.1.0",
     "faker>=40.54.0",
     "fastapi>=0.163.0",
