@@ -7,12 +7,19 @@ venv/
 .mypy_cache/
 .ruff_cache/
 
-data/raw/*
+# Données brutes Kaggle (volumineuses, jamais commitées)
+data/raw/kaggle/
+
+# Données finales du pipeline (versionnées, ~10 Mo)
+!data/raw/transactions.csv
+!data/raw/cards.csv
+!data/raw/users.csv
+
+# Delta Lake (régénérable, jamais commité)
 data/delta/*
+
+# Scénarios de panne (régénérables)
 data/scenarios/*
-!data/raw/.gitkeep
-!data/delta/.gitkeep
-!data/scenarios/.gitkeep
 
 logs/
 *.log

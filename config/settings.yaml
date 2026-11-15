@@ -1,0 +1,8 @@
+project:
+  name: datarescue
+  env: dev
+
+data:
+  kaggle_date_start: "2010-01-01"
+  kaggle_date_end: "2010-02-01"
+  kaggle_sample_size: null
