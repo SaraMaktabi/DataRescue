@@ -67,14 +67,15 @@ services:
   spark:
     build:
       context: ./docker/spark
+    environment:
+      - SPARK_MODE=master
+      - IN_DOCKER=true
     volumes:
-      - ./src:/opt/src
-      - ./data:/opt/data
-      - ./config:/opt/config
+      - ./:/opt/DataRescue
     ports:
       - "4040:4040"
       - "7077:7077"
-      - "8081:8081"   # Spark Master UI
+      - "8081:8081"
     command: >
       bash -c "
       /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master

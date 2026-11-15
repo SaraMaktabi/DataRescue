@@ -15,8 +15,6 @@ data/raw/kaggle/
 !data/raw/cards.csv
 !data/raw/users.csv
 
-# Delta Lake (régénérable, jamais commité)
-data/delta/*
 
 # Scénarios de panne (régénérables)
 data/scenarios/*
