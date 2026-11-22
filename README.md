@@ -15,3 +15,8 @@ cd DataRescue
 uv sync                    # recrée le venv exact depuis uv.lock
 Copy-Item .env.example .env
 docker compose up -d --build
+
+
+## Données Delta
+Les tables `data/delta/` ne sont **pas versionnées** dans Git.
+Après un `git clone`, régénérez-les avec les scripts Bronze/Silver.

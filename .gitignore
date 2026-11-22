@@ -16,6 +16,9 @@ data/raw/kaggle/
 !data/raw/users.csv
 
 
+data/delta/*
+!data/delta/.gitkeep
+
 # Scénarios de panne (régénérables)
 data/scenarios/*
 
