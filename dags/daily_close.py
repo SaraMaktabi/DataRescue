@@ -185,9 +185,31 @@ def gold_daily_merchant_summary(**context) -> dict:
 
 
 def gold_reconciliation_check(**context) -> dict:
-    """STUB — à implémenter : contrôle débits = crédits (règle R7)."""
-    log.info("TODO: gold_reconciliation_check (stub)")
-    return {"status": "stub"}
+    """Contrôle débits = crédits par jour (règle R7)."""
+    from src.pipeline.gold.aggregate import build_reconciliation_check
+    from src.pipeline.paths import data_delta
+    from src.pipeline.spark_session import get_spark
+    from src.utils.logging import get_logger
+    from pyspark.sql import functions as F
+
+    log = get_logger("dag_gold_recon")
+    spark = get_spark("DAG-Gold-Recon")
+
+    silver = spark.read.format("delta").load(str(data_delta("silver", "transactions")))
+    recon = build_reconciliation_check(silver)
+    count = recon.count()
+    non_reconciled = recon.filter(~F.col("is_reconciled")).count()
+
+    (
+        recon.write
+        .format("delta")
+        .mode("overwrite")
+        .save(str(data_delta("gold", "reconciliation_check")))
+    )
+
+    log.info("Gold reconciliation_check : %d jours, %d non réconciliés", count, non_reconciled)
+    spark.stop()
+    return {"days": count, "non_reconciled": non_reconciled}
 
 
 def lineage_update(**context) -> dict:

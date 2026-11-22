@@ -35,3 +35,19 @@ net_flow : total_credits - total_debits
 transaction_count : nombre de transactions
 
 C'est la table métier de base pour le reporting et pour la réconciliation.
+
+
+gold_reconciliation_check.
+
+Ce qu'elle contient
+Pour chaque jour, on calcule :
+
+total_debits : somme de tous les montants négatifs (en valeur absolue)
+
+total_credits : somme de tous les montants positifs
+
+difference : total_credits - total_debits
+
+is_reconciled : booléen (true si difference == 0, sinon false)
+
+C'est cette table qui alimente la règle R7 du cahier des charges : "total débits ≠ total crédits → escalade obligatoire". Elle sera utilisée dans le scénario de démo "reprise refusée".

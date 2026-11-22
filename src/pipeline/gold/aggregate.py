@@ -54,6 +54,37 @@ def build_daily_account_summary(silver: DataFrame) -> DataFrame:
     )
     return summary
 
+def build_reconciliation_check(silver: DataFrame) -> DataFrame:
+    """
+    Contrôle de réconciliation : débits = crédits par jour.
+
+    Colonnes de sortie :
+    - date
+    - total_debits
+    - total_credits
+    - difference     (credits - debits)
+    - is_reconciled  (true si difference == 0)
+    """
+    df = silver.withColumn("date", F.to_date("timestamp"))
+
+    recon = (
+        df.groupBy("date")
+        .agg(
+            F.sum(F.when(F.col("amount") < 0, F.abs(F.col("amount"))).otherwise(0.0)).alias("total_debits"),
+            F.sum(F.when(F.col("amount") > 0, F.col("amount")).otherwise(0.0)).alias("total_credits"),
+        )
+        .withColumn("difference", F.round(F.col("total_credits") - F.col("total_debits"), 2))
+        .withColumn("is_reconciled", F.col("difference") == 0)
+        .select(
+            "date",
+            F.round("total_debits", 2).alias("total_debits"),
+            F.round("total_credits", 2).alias("total_credits"),
+            "difference",
+            "is_reconciled",
+        )
+        .orderBy("date")
+    )
+    return recon
 
 def main() -> None:
     log.info("=== Agrégats Gold : daily_account_summary ===")
@@ -69,6 +100,29 @@ def main() -> None:
     log.info("Lignes Gold produites : %d", out_count)
 
     out_path = data_delta("gold", "daily_account_summary")
+
+    # --- Réconciliation ---
+    log.info("=== Agrégats Gold : reconciliation_check ===")
+    recon = build_reconciliation_check(silver)
+    recon_count = recon.count()
+    log.info("Lignes réconciliation : %d", recon_count)
+
+    recon_path = data_delta("gold", "reconciliation_check")
+    (
+        recon.write
+        .format("delta")
+        .mode("overwrite")
+        .save(str(recon_path))
+    )
+    log.info("Écrit : %s", recon_path)
+
+    # Aperçu + alerte si non réconcilié
+    recon.show(31, truncate=False)
+    non_reconciled = recon.filter(~F.col("is_reconciled")).count()
+    if non_reconciled > 0:
+        log.warning("ATTENTION : %d jours non réconciliés", non_reconciled)
+    else:
+        log.info("Tous les jours sont réconciliés")
     (
         summary.write
         .format("delta")
