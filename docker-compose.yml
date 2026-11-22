@@ -20,7 +20,7 @@ x-airflow-common: &airflow-common
   depends_on:
     postgres:
       condition: service_healthy
-  user: "${AIRFLOW_UID:-50000}:0"
+  user: "0:0"
 
 services:
   postgres:
