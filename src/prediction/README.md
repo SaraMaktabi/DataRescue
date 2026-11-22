@@ -141,10 +141,101 @@ repère. Les sorties du modèle ne sont pas calibrées et ne doivent pas être
 interprétées comme des probabilités fiables en production. Aucun seuil n'est
 optimisé sur le test. SHAP, XGBoost et Isolation Forest restent à ajouter.
 
+## Étape 4 : XGBoost
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -p "test_prediction_*.py" -v
+.\.venv\Scripts\python.exe -m src.prediction.train_xgboost --output-dir data/prediction/xgb_mon_test
+Get-Content -Encoding utf8 data/prediction/xgb_mon_test/report.json
+```
+
+Attendu : 19 tests réussis. Le dossier de sortie doit être nouveau. Le module
+réutilise le découpage, les variables, le prétraitement et les métriques de
+Random Forest. La pondération `scale_pos_weight` est le rapport succès/pannes
+sur l'entraînement uniquement. Les paramètres initiaux sont fixes : 200 arbres,
+profondeur 3, learning rate 0,05. Aucune recherche de paramètres ni early stopping
+n'utilise la validation ou le test à cette étape.
+
+Le rapport conserve l'empreinte des données, les périodes et les versions de
+scikit-learn et XGBoost. Comparer seulement des expériences ayant la même empreinte
+et les mêmes périodes. Le modèle sauvegardé inclut son prétraitement.
+
+Les métriques `xgboost_threshold_0_5` et `xgboost_same_alert_count` ont les mêmes
+définitions que celles de Random Forest. Le budget commun reste celui des alertes
+de la baseline sur la validation, pour une comparaison rétrospective. Il ne
+constitue pas encore un budget opérationnel fixé à l'avance. Le test reste réservé.
+
+## Réglage du seuil sur la validation
+
+Le modèle reste inchangé. Cette commande utilise ses prédictions sauvegardées :
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -p "test_prediction_*.py" -v
+.\.venv\Scripts\python.exe -m src.prediction.tune_threshold --model-dir data/prediction/xgb_mon_test --output-dir data/prediction/xgb_seuil_mon_test --max-alert-rate 0.15
+Get-Content -Encoding utf8 data/prediction/xgb_seuil_mon_test/threshold.json
+```
+
+Les 23 tests couvrent notamment les scores ex aequo, le budget nul et le refus
+d'un rapport de test. Le dossier de sortie doit être nouveau. La commande fonctionne
+aussi avec un dossier d'expérience Random Forest.
+
+Le budget de 15 % est une hypothèse expérimentale modifiable, pas une exigence du
+CDC. Sur 540 observations, il autorise au maximum 81 alertes. Tous les seuils
+correspondant aux scores distincts sont comparés, ainsi que 0,5 et un seuil sans
+alerte. Sélection : rappel maximal sous budget, puis moins de faux positifs,
+puis seuil le plus élevé. Les scores égaux sont toujours traités ensemble.
+
+`threshold_comparison.csv` contient les métriques par seuil ; `threshold.json`
+enregistre le seuil retenu, le budget, les empreintes du modèle et des données.
+La règle sauvegardée est `score >= threshold`. Un seuil supérieur à 1 signifie
+aucune alerte. Le modèle n'est ni modifié ni réentraîné.
+
+Ces résultats sont calculés sur la validation qui sert à choisir le seuil : ils
+ne constituent pas une évaluation indépendante. Le taux d'alertes futur n'est pas
+garanti et l'Average Precision ne change pas. L'évaluation finale devra appliquer
+le seuil figé au test sans le réajuster.
+
+## Recherche des paramètres XGBoost
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -p "test_prediction_*.py" -v
+.\.venv\Scripts\python.exe -m src.prediction.search_xgboost --output-dir data/prediction/xgb_search_mon_test
+Get-Content -Encoding utf8 data/prediction/xgb_search_mon_test/search_report.json
+Get-Content -Encoding utf8 data/prediction/xgb_search_mon_test/report.json
+```
+
+Attendu : 27 tests réussis. Le dossier de sortie doit être nouveau. La recherche
+compare 12 configurations sur trois fenêtres croissantes au sein des 255 jours
+d'entraînement uniquement. Toutes les tâches d'un jour restent ensemble.
+Chaque prétraitement et chaque pondération sont ajustés à nouveau sur le passé
+de la fenêtre. Les observations de validation interne suivent ce passé.
+
+Les candidats combinent quatre couples (nombre d'arbres, profondeur) et trois
+pondérations : ratio succès/pannes, racine du ratio, aucune pondération. Le modèle
+initial fait partie des candidats. La moyenne non pondérée des trois Average
+Precision choisit le candidat ; une égalité conserve le premier. Aucun early
+stopping ni choix de paramètres ne consulte la validation externe ou le test.
+
+Le candidat retenu est réentraîné sur tout l'entraînement, puis évalué sur la
+validation externe. `search_report.json` décrit les fenêtres, tous les candidats
+et les scores internes. `report.json`, `model.joblib` et les prédictions suivent
+le format habituel. Une recherche peut ne pas améliorer la validation externe.
+Les historiques utilisés supposent un scoring quotidien avec les résultats
+des jours précédents disponibles, comme pour les autres expériences.
+
+Pour régler ensuite le seuil du nouveau modèle (les scores ont changé) :
+
+```powershell
+.\.venv\Scripts\python.exe -m src.prediction.tune_threshold --model-dir data/prediction/xgb_search_mon_test --output-dir data/prediction/xgb_search_seuil_mon_test --max-alert-rate 0.15
+```
+
+Le test final reste réservé. Ne pas multiplier les recherches en fonction des
+résultats de validation au risque de surajuster cette période.
+
 ## Étapes suivantes, en commits séparés
 
 1. Historique, découpage chronologique et baseline : implémentés.
-2. Random Forest : implémenté ; ajouter XGBoost et Isolation Forest.
+2. Random Forest et XGBoost : implémentés ; ajouter Isolation Forest.
 3. Évaluer les alertes (PR-AUC, précision/rappel à budget fixé, F1, faux positifs).
 4. Ajouter les explications SHAP et la sauvegarde du modèle retenu.
 5. Intégrer le scoring avant les tâches et journaliser les prédictions.

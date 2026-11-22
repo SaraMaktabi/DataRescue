@@ -30,15 +30,18 @@ def feature_frame(rows: list[dict]) -> pd.DataFrame:
     return frame
 
 
-def build_model(seed: int = 42, trees: int = 200) -> Pipeline:
+def build_preprocessing() -> ColumnTransformer:
     numeric = [column for column in FEATURE_COLUMNS if column != "task_id"]
-    preprocessing = ColumnTransformer([
+    return ColumnTransformer([
         ("numeric", SimpleImputer(strategy="median", add_indicator=True,
                                   keep_empty_features=True), numeric),
         ("task", OneHotEncoder(handle_unknown="ignore"), ["task_id"]),
     ])
+
+
+def build_model(seed: int = 42, trees: int = 200) -> Pipeline:
     return Pipeline([
-        ("preprocessing", preprocessing),
+        ("preprocessing", build_preprocessing()),
         ("classifier", RandomForestClassifier(
             n_estimators=trees, min_samples_leaf=5, class_weight="balanced",
             random_state=seed, n_jobs=1,
@@ -55,7 +58,10 @@ def top_k_alerts(scores: list[float], budget: int) -> list[int]:
 
 
 def train(input_path: Path, output_dir: Path, seed: int = 42,
-          trees: int = 200) -> dict:
+          trees: int = 200, *, model_kind: str = "random_forest",
+          xgb_parameters: dict | None = None) -> dict:
+    if model_kind not in {"random_forest", "xgboost"}:
+        raise ValueError("Modèle inconnu")
     if output_dir.exists():
         raise FileExistsError(f"Dossier existant : {output_dir}")
     splits = chronological_split(load_history(input_path))
@@ -63,7 +69,25 @@ def train(input_path: Path, output_dir: Path, seed: int = 42,
     y_train = [r["failed"] for r in training]
     if set(y_train) != {0, 1}:
         raise ValueError("L'entraînement nécessite des succès et des pannes")
-    model = build_model(seed, trees)
+    versions = {}
+    if model_kind == "xgboost":
+        import xgboost
+        from src.prediction.train_xgboost import build_xgboost
+
+        weight = y_train.count(0) / y_train.count(1)
+        model = build_xgboost(seed, trees, weight)
+        parameters = {"n_estimators": trees, "max_depth": 3, "learning_rate": 0.05,
+                      "min_child_weight": 5, "subsample": 0.8, "colsample_bytree": 0.8,
+                      "scale_pos_weight": weight, "tree_method": "hist",
+                      "objective": "binary:logistic", "eval_metric": "logloss"}
+        if xgb_parameters:
+            parameters.update(xgb_parameters)
+            model.named_steps["classifier"].set_params(**xgb_parameters)
+        versions["xgboost_version"] = xgboost.__version__
+    else:
+        model = build_model(seed, trees)
+        parameters = {"n_estimators": trees, "min_samples_leaf": 5,
+                      "class_weight": "balanced"}
     model.fit(feature_frame(training), y_train)
     scores = model.predict_proba(feature_frame(validation))[:, 1].tolist()
     labels = [r["failed"] for r in validation]
@@ -75,21 +99,21 @@ def train(input_path: Path, output_dir: Path, seed: int = 42,
         "evaluation_set": "validation", "test_evaluated": False,
         "input_sha256": hashlib.sha256(input_path.read_bytes()).hexdigest(),
         "seed": seed, "sklearn_version": sklearn.__version__,
+        "model_kind": model_kind, **versions,
         "features": list(FEATURE_COLUMNS),
-        "model_parameters": {"n_estimators": trees, "min_samples_leaf": 5,
-                             "class_weight": "balanced"},
+        "model_parameters": parameters,
         "splits": {name: {"rows": len(rows), "start": rows[0]["date"],
                           "end": rows[-1]["date"]} for name, rows in splits.items()},
         "baseline": classification_metrics(labels, fixed_alerts),
-        "random_forest_threshold_0_5": classification_metrics(labels, rf_alerts),
-        "random_forest_same_alert_count": classification_metrics(labels, ranked_alerts),
+        f"{model_kind}_threshold_0_5": classification_metrics(labels, rf_alerts),
+        f"{model_kind}_same_alert_count": classification_metrics(labels, ranked_alerts),
         "comparison_alert_budget": budget,
         "average_precision": float(average_precision_score(labels, scores)) if any(labels) else None,
         "failure_prevalence": sum(labels) / len(labels),
         "notes": [
             "Average precision : résumé non interpolé de la courbe précision-rappel, pas aire trapézoïdale.",
             "Comparaison top-k rétrospective au nombre d'alertes de la baseline ; pas une politique en ligne.",
-            "Probabilités Random Forest non calibrées ; seuil 0.5 fixé sans optimisation.",
+            "Probabilités non calibrées ; seuil 0.5 fixé sans optimisation.",
         ],
     }
     output_dir.mkdir(parents=True, exist_ok=False)
