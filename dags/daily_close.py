@@ -153,9 +153,29 @@ def quality_check_transactions(**context) -> dict:
 
 
 def gold_daily_account_summary(**context) -> dict:
-    """STUB — à implémenter : agrégats par compte et par jour."""
-    log.info("TODO: gold_daily_account_summary (stub)")
-    return {"status": "stub"}
+    """Agrégats par compte et par jour."""
+    from src.pipeline.gold.aggregate import build_daily_account_summary
+    from src.pipeline.paths import data_delta
+    from src.pipeline.spark_session import get_spark
+    from src.utils.logging import get_logger
+
+    log = get_logger("dag_gold_accounts")
+    spark = get_spark("DAG-Gold-Accounts")
+
+    silver = spark.read.format("delta").load(str(data_delta("silver", "transactions")))
+    summary = build_daily_account_summary(silver)
+    count = summary.count()
+
+    (
+        summary.write
+        .format("delta")
+        .mode("overwrite")
+        .save(str(data_delta("gold", "daily_account_summary")))
+    )
+
+    log.info("Gold daily_account_summary : %d lignes", count)
+    spark.stop()
+    return {"gold_account_summary_count": count}
 
 
 def gold_daily_merchant_summary(**context) -> dict:

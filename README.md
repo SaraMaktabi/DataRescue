@@ -20,3 +20,18 @@ docker compose up -d --build
 ## Données Delta
 Les tables `data/delta/` ne sont **pas versionnées** dans Git.
 Après un `git clone`, régénérez-les avec les scripts Bronze/Silver.
+
+daily_account_summary.
+
+Ce qu'elle contient
+Pour chaque account_id et chaque jour, on calcule :
+
+total_debits : somme des montants négatifs (en valeur absolue)
+
+total_credits : somme des montants positifs
+
+net_flow : total_credits - total_debits
+
+transaction_count : nombre de transactions
+
+C'est la table métier de base pour le reporting et pour la réconciliation.

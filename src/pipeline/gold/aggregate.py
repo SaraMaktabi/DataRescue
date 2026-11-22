@@ -1,0 +1,88 @@
+"""
+Agrégats Gold : tables métier calculées à partir de Silver.
+
+Tables produites :
+- gold/daily_account_summary   : agrégats par compte et par jour
+- gold/daily_merchant_summary  : agrégats par marchand et par jour (à venir)
+- gold/reconciliation_check    : contrôle débits = crédits (à venir)
+
+Usage :
+    uv run python -m src.pipeline.gold.aggregate
+"""
+from pathlib import Path
+
+from pyspark.sql import DataFrame
+from pyspark.sql import functions as F
+
+from src.pipeline.paths import data_delta
+from src.pipeline.spark_session import get_spark
+from src.utils.logging import get_logger
+
+log = get_logger("gold_aggregate")
+
+
+def build_daily_account_summary(silver: DataFrame) -> DataFrame:
+    """
+    Agrégats par compte et par jour.
+
+    Colonnes de sortie :
+    - account_id
+    - date
+    - total_debits   (somme des montants < 0, en valeur absolue)
+    - total_credits  (somme des montants > 0)
+    - net_flow       (credits - debits)
+    - transaction_count
+    """
+    df = silver.withColumn("date", F.to_date("timestamp"))
+
+    summary = (
+        df.groupBy("account_id", "date")
+        .agg(
+            F.sum(F.when(F.col("amount") < 0, F.abs(F.col("amount"))).otherwise(0.0)).alias("total_debits"),
+            F.sum(F.when(F.col("amount") > 0, F.col("amount")).otherwise(0.0)).alias("total_credits"),
+            F.count("*").alias("transaction_count"),
+        )
+        .withColumn("net_flow", F.col("total_credits") - F.col("total_debits"))
+        .select(
+            "account_id",
+            "date",
+            F.round("total_debits", 2).alias("total_debits"),
+            F.round("total_credits", 2).alias("total_credits"),
+            F.round("net_flow", 2).alias("net_flow"),
+            "transaction_count",
+        )
+    )
+    return summary
+
+
+def main() -> None:
+    log.info("=== Agrégats Gold : daily_account_summary ===")
+
+    spark = get_spark("Gold-Aggregate")
+    silver = spark.read.format("delta").load(str(data_delta("silver", "transactions")))
+
+    silver_count = silver.count()
+    log.info("Lignes Silver lues : %d", silver_count)
+
+    summary = build_daily_account_summary(silver)
+    out_count = summary.count()
+    log.info("Lignes Gold produites : %d", out_count)
+
+    out_path = data_delta("gold", "daily_account_summary")
+    (
+        summary.write
+        .format("delta")
+        .mode("overwrite")
+        .save(str(out_path))
+    )
+    log.info("Écrit : %s", out_path)
+
+    # Aperçu
+    summary.orderBy(F.desc("date"), F.desc("total_credits")).show(5, truncate=False)
+
+    spark.stop()
+    log.info("=== Terminé ===")
+
+
+if __name__ == "__main__":
+    main()
