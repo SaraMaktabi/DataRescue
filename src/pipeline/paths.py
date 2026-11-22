@@ -15,3 +15,6 @@ def data_raw(*parts: str) -> Path:
 
 def data_delta(*parts: str) -> Path:
     return _base() / "data" / "delta" / Path(*parts)
+
+def data_reports(*parts: str) -> Path:
+    return _base() / "data" / "reports" / Path(*parts)

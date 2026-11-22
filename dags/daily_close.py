@@ -179,9 +179,29 @@ def gold_daily_account_summary(**context) -> dict:
 
 
 def gold_daily_merchant_summary(**context) -> dict:
-    """STUB — à implémenter : agrégats par marchand et par jour."""
-    log.info("TODO: gold_daily_merchant_summary (stub)")
-    return {"status": "stub"}
+    """Agrégats par marchand et par jour."""
+    from src.pipeline.gold.aggregate import build_daily_merchant_summary
+    from src.pipeline.paths import data_delta
+    from src.pipeline.spark_session import get_spark
+    from src.utils.logging import get_logger
+
+    log = get_logger("dag_gold_merchants")
+    spark = get_spark("DAG-Gold-Merchants")
+
+    silver = spark.read.format("delta").load(str(data_delta("silver", "transactions")))
+    merchant = build_daily_merchant_summary(silver)
+    count = merchant.count()
+
+    (
+        merchant.write
+        .format("delta")
+        .mode("overwrite")
+        .save(str(data_delta("gold", "daily_merchant_summary")))
+    )
+
+    log.info("Gold daily_merchant_summary : %d lignes", count)
+    spark.stop()
+    return {"gold_merchant_summary_count": count}
 
 
 def gold_reconciliation_check(**context) -> dict:
@@ -219,9 +239,10 @@ def lineage_update(**context) -> dict:
 
 
 def report_export(**context) -> dict:
-    """STUB — à implémenter : export des tables Gold en CSV/Parquet."""
-    log.info("TODO: report_export (stub)")
-    return {"status": "stub"}
+    """Export des tables Gold en CSV pour le reporting."""
+    from src.pipeline.gold.export import main as export_main
+    export_main()
+    return {"status": "exported"}
 
 
 def notify_completion(**context) -> dict:

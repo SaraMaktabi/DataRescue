@@ -86,6 +86,41 @@ def build_reconciliation_check(silver: DataFrame) -> DataFrame:
     )
     return recon
 
+def build_daily_merchant_summary(silver: DataFrame) -> DataFrame:
+    """
+    Agrégats par marchand et par jour.
+
+    Colonnes de sortie :
+    - merchant_id
+    - merchant_city
+    - merchant_state
+    - date
+    - total_amount
+    - transaction_count
+    - avg_amount
+    """
+    df = silver.withColumn("date", F.to_date("timestamp"))
+
+    merchant = (
+        df.groupBy("merchant_id", "merchant_city", "merchant_state", "date")
+        .agg(
+            F.sum(F.abs(F.col("amount"))).alias("total_amount"),
+            F.count("*").alias("transaction_count"),
+            F.avg(F.abs(F.col("amount"))).alias("avg_amount"),
+        )
+        .select(
+            "merchant_id",
+            "merchant_city",
+            "merchant_state",
+            "date",
+            F.round("total_amount", 2).alias("total_amount"),
+            "transaction_count",
+            F.round("avg_amount", 2).alias("avg_amount"),
+        )
+        .orderBy(F.desc("date"), F.desc("total_amount"))
+    )
+    return merchant
+
 def main() -> None:
     log.info("=== Agrégats Gold : daily_account_summary ===")
 
@@ -123,6 +158,24 @@ def main() -> None:
         log.warning("ATTENTION : %d jours non réconciliés", non_reconciled)
     else:
         log.info("Tous les jours sont réconciliés")
+
+        # --- Marchands ---
+    log.info("=== Agrégats Gold : daily_merchant_summary ===")
+    merchant = build_daily_merchant_summary(silver)
+    merchant_count = merchant.count()
+    log.info("Lignes marchands : %d", merchant_count)
+
+    merchant_path = data_delta("gold", "daily_merchant_summary")
+    (
+        merchant.write
+        .format("delta")
+        .mode("overwrite")
+        .save(str(merchant_path))
+    )
+    log.info("Écrit : %s", merchant_path)
+    merchant.show(5, truncate=False)
+
+    
     (
         summary.write
         .format("delta")
