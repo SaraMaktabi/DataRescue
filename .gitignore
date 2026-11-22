@@ -22,6 +22,9 @@ data/delta/*
 # Scénarios de panne (régénérables)
 data/scenarios/*
 
+# Historiques ML synthétiques (régénérables)
+data/prediction/
+
 logs/
 *.log
 airflow-logs/
