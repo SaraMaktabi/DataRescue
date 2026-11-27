@@ -7,13 +7,14 @@ from pathlib import Path
 from sklearn.pipeline import Pipeline
 from xgboost import XGBClassifier
 
+from src.prediction.task_load import TaskLoadFeatures
 from src.prediction.train_random_forest import build_preprocessing, train
 
 
 def build_xgboost(seed: int = 42, trees: int = 200,
-                  scale_pos_weight: float = 1.0) -> Pipeline:
+                  scale_pos_weight: float = 1.0, *, task_load: bool = False) -> Pipeline:
     return Pipeline([
-        ("preprocessing", build_preprocessing()),
+        ("preprocessing", TaskLoadFeatures() if task_load else build_preprocessing()),
         ("classifier", XGBClassifier(
             n_estimators=trees, max_depth=3, learning_rate=0.05,
             min_child_weight=5, subsample=0.8, colsample_bytree=0.8,

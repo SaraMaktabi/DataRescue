@@ -2,9 +2,22 @@ import unittest
 
 from src.prediction.generate_history import generate_history
 from src.prediction.search_xgboost import class_weight, select_parameters, temporal_folds
+from src.prediction.task_load import TaskLoadFeatures
+from src.prediction.train_random_forest import feature_frame
 
 
 class SearchTests(unittest.TestCase):
+    def test_task_load_uses_fitted_volume_and_falls_back_for_new_tasks(self):
+        rows = generate_history(10)
+        training = feature_frame(rows[:10])
+        row = rows[0]
+        features = TaskLoadFeatures().fit(training)
+        future = feature_frame([
+            row | {"input_rows": 2 * row["input_rows"]},
+            row | {"task_id": "new_task", "input_rows": 300, "volume_mean_7d": 200},
+        ])
+        self.assertEqual(features.transform(future)["relative_load"].tolist(), [2.0, 1.5])
+
     def test_folds_respect_days_and_time(self):
         rows = generate_history(60)
         for past, future in temporal_folds(rows):

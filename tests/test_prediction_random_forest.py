@@ -78,3 +78,19 @@ class RandomForestTests(unittest.TestCase):
                 self.assertGreater(row["date"], report["splits"]["validation"]["end"])
                 self.assertEqual(int(row["selected_alert"]),
                                  int(float(row["failure_score"]) >= point["threshold"]))
+
+    def test_isolation_forest_ignores_training_labels(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            rows = generate_history(60)
+            original = root / "original.csv"
+            unlabeled = root / "unlabeled.csv"
+            write_history(rows, original)
+            write_history([row | {"failed": 0} for row in rows[:420]] + rows[420:], unlabeled)
+            options = {"trees": 5, "model_kind": "isolation_forest", "evaluate_test": True}
+            first = train(original, root / "first", **options)
+            second = train(unlabeled, root / "second", **options)
+            self.assertEqual(first["score_kind"], "anomaly_score")
+            self.assertEqual(first["operating_point"], second["operating_point"])
+            self.assertEqual((root / "first" / "test_predictions.csv").read_bytes(),
+                             (root / "second" / "test_predictions.csv").read_bytes())

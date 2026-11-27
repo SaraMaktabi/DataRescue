@@ -210,9 +210,15 @@ d'entraînement uniquement. Toutes les tâches d'un jour restent ensemble.
 Chaque prétraitement et chaque pondération sont ajustés à nouveau sur le passé
 de la fenêtre. Les observations de validation interne suivent ce passé.
 
-Les candidats combinent quatre couples (nombre d'arbres, profondeur) et trois
+Douze candidats combinent quatre couples (nombre d'arbres, profondeur) et trois
 pondérations : ratio succès/pannes, racine du ratio, aucune pondération. Le modèle
-initial fait partie des candidats. La moyenne non pondérée des trois Average
+initial fait partie des candidats. L'option expérimentale `--include-task-load`
+ajoute trois candidats qui utilisent le
+volume courant rapporté au volume médian de la tâche sur la fenêtre d'entraînement,
+la variation récente de volume et la pression mémoire précédente normalisée.
+Leurs scores sont contraints à augmenter ou rester stables quand le retard,
+le taux de valeurs manquantes ou le volume relatif augmente, à entrées égales.
+La moyenne non pondérée des trois Average
 Precision choisit le candidat ; une égalité conserve le premier. Aucun early
 stopping ni choix de paramètres ne consulte la validation externe ou le test.
 
@@ -246,10 +252,40 @@ trouve dans `operating_point.threshold` dans `report.json`.
 Comparer le rappel, le F1 et les faux positifs avec l'accuracy, qui peut être
 élevée simplement parce que les succès sont majoritaires.
 
+## Expliquer les alertes XGBoost avec SHAP
+
+```powershell
+.\.venv\Scripts\python.exe -m src.prediction.explain_xgboost --input data/prediction/mon_test.csv --model-dir data/prediction/xgb_detection --output data/prediction/xgb_detection/shap_alerts.csv
+```
+
+Le CSV présente la panne détectée et la fausse alerte de score le plus élevé,
+puis l'alerte restante la mieux classée. Il donne jusqu'à trois facteurs qui
+augmentent le score, classés par contribution. Les valeurs SHAP sont exprimées
+en log-odds, sur l'échelle interne de XGBoost. Elles décrivent le calcul du
+modèle. Le seuil et les prédictions de l'expérience restent ceux du rapport.
+
+## Comparer Random Forest, XGBoost et Isolation Forest
+
+```powershell
+.\.venv\Scripts\python.exe -m src.prediction.compare_models --input data/prediction/mon_test.csv --output-dir data/prediction/model_comparison
+```
+
+Le dossier de sortie doit être nouveau. Les trois modèles utilisent les mêmes
+périodes chronologiques. Isolation Forest apprend sur les variables d'entrée
+sans labels de panne. Son score d'anomalie augmente quand l'exécution paraît
+plus inhabituelle. Les labels servent au choix du seuil sur la validation et
+au calcul des résultats.
+
+Chaque seuil respecte le budget `--max-alert-rate` sur la validation
+(15 % par défaut). Il est ensuite appliqué au test. Le taux d'alertes observé
+sur le test peut différer d'un modèle à l'autre. Le fichier `comparison.csv`
+regroupe les résultats et chaque sous-dossier contient le modèle, son rapport
+et ses prédictions.
+
 ## Étapes suivantes, en commits séparés
 
 1. Historique, découpage chronologique et baseline : implémentés.
-2. Random Forest et XGBoost : implémentés ; ajouter Isolation Forest.
+2. Random Forest, XGBoost et Isolation Forest : implémentés.
 3. Évaluer les alertes (PR-AUC, précision/rappel à budget fixé, F1, faux positifs).
-4. Ajouter les explications SHAP et la sauvegarde du modèle retenu.
+4. Étendre les explications SHAP au scoring intégré.
 5. Intégrer le scoring avant les tâches et journaliser les prédictions.

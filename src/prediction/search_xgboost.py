@@ -33,12 +33,19 @@ def class_weight(labels: list[int], mode: str) -> float:
     return {"none": 1.0, "sqrt": math.sqrt(ratio), "ratio": ratio}[mode]
 
 
-def candidates() -> list[dict]:
+def candidates(*, include_task_load: bool = False) -> list[dict]:
     # Référence initiale incluse ; ordre fixe pour départager les égalités.
-    return [dict(n_estimators=trees, max_depth=depth, learning_rate=0.05,
+    standard = [dict(n_estimators=trees, max_depth=depth, learning_rate=0.05,
                  min_child_weight=5, weight_mode=mode)
             for trees, depth in [(200, 3), (100, 2), (200, 2), (200, 5)]
             for mode in ("ratio", "sqrt", "none")]
+    if not include_task_load:
+        return standard
+    return standard + [
+        dict(n_estimators=trees, max_depth=2, weight_mode="none", task_load=True,
+             monotone_constraints=(1, 1, 1, 0, 0))
+        for trees in (50, 100, 200)
+    ]
 
 
 def select_parameters(rows: list[dict], seed: int = 42,
@@ -47,7 +54,7 @@ def select_parameters(rows: list[dict], seed: int = 42,
     frame = feature_frame(rows)
     results = []
     for candidate in configurations if configurations is not None else candidates():
-        parameters = {k: v for k, v in candidate.items() if k != "weight_mode"}
+        parameters = {k: v for k, v in candidate.items() if k not in {"weight_mode", "task_load"}}
         fold_scores = []
         weights = []
         for past, future in folds:
@@ -56,7 +63,8 @@ def select_parameters(rows: list[dict], seed: int = 42,
             if not any(valid_labels):
                 raise ValueError("Chaque fenêtre de validation interne doit contenir une panne")
             weight = class_weight(labels, candidate["weight_mode"])
-            model = build_xgboost(seed=seed, scale_pos_weight=weight)
+            model = build_xgboost(seed=seed, scale_pos_weight=weight,
+                                  task_load=candidate.get("task_load", False))
             model.named_steps["classifier"].set_params(**parameters)
             model.fit(frame.iloc[past], labels)
             scores = model.predict_proba(frame.iloc[future])[:, 1]
@@ -68,12 +76,13 @@ def select_parameters(rows: list[dict], seed: int = 42,
     if not results:
         raise ValueError("Aucune configuration à comparer")
     best = max(results, key=lambda result: result["mean_average_precision"])
-    selected = {k: v for k, v in best["parameters"].items() if k != "weight_mode"}
+    selected = {k: v for k, v in best["parameters"].items() if k not in {"weight_mode", "task_load"}}
     selected["scale_pos_weight"] = class_weight(
         [r["failed"] for r in rows], best["parameters"]["weight_mode"])
     return {
         "selection_set": "train_only", "selection_metric": "mean_average_precision",
         "seed": seed, "best": best, "selected_parameters": selected,
+        "selected_task_load": best["parameters"].get("task_load", False),
         "candidates": results,
         "folds": [{"train_start": min(rows[i]["date"] for i in past),
                    "train_end": max(rows[i]["date"] for i in past),
@@ -85,14 +94,16 @@ def select_parameters(rows: list[dict], seed: int = 42,
 
 
 def search(input_path: Path, output_dir: Path, seed: int = 42, *,
-           max_alert_rate: float = 0.15, evaluate_test: bool = False) -> dict:
+           max_alert_rate: float = 0.15, evaluate_test: bool = False,
+           include_task_load: bool = False) -> dict:
     if output_dir.exists():
         raise FileExistsError(f"Dossier existant : {output_dir}")
     training = chronological_split(load_history(input_path))["train"]
-    selection = select_parameters(training, seed)
+    selection = select_parameters(training, seed, candidates(include_task_load=include_task_load))
     report = train(input_path, output_dir, seed, model_kind="xgboost",
                    xgb_parameters=selection["selected_parameters"],
-                   max_alert_rate=max_alert_rate, evaluate_test=evaluate_test)
+                   max_alert_rate=max_alert_rate, evaluate_test=evaluate_test,
+                   task_load=selection["selected_task_load"])
     selection["input_sha256"] = report["input_sha256"]
     selection["test_evaluated"] = False
     (output_dir / "search_report.json").write_text(
@@ -108,10 +119,12 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--max-alert-rate", type=float, default=0.15)
     parser.add_argument("--evaluate-test", action="store_true")
+    parser.add_argument("--include-task-load", action="store_true")
     args = parser.parse_args()
     try:
         report = search(args.input, args.output_dir, args.seed,
-                        max_alert_rate=args.max_alert_rate, evaluate_test=args.evaluate_test)
+                        max_alert_rate=args.max_alert_rate, evaluate_test=args.evaluate_test,
+                        include_task_load=args.include_task_load)
     except (ValueError, OSError) as exc:
         parser.error(str(exc))
     print("Parametres retenus :", json.dumps(report["model_parameters"]))
