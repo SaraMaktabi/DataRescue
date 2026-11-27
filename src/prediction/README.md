@@ -232,6 +232,20 @@ Pour régler ensuite le seuil du nouveau modèle (les scores ont changé) :
 Le test final reste réservé. Ne pas multiplier les recherches en fonction des
 résultats de validation au risque de surajuster cette période.
 
+## Détection des pannes avec seuil validé
+
+```powershell
+.\.venv\Scripts\python.exe -m src.prediction.search_xgboost --input data/prediction/mon_test.csv --output-dir data/prediction/xgb_detection --evaluate-test
+```
+
+Le seuil maximise le rappel sur la validation dans le budget d'alertes
+(`--max-alert-rate`, 15 % par défaut). Le test chronologique optionnel applique
+ce seuil figé et exporte les décisions dans `test_predictions.csv`.
+Pour lire les alertes, utiliser `selected_alert`. Le seuil correspondant se
+trouve dans `operating_point.threshold` dans `report.json`.
+Comparer le rappel, le F1 et les faux positifs avec l'accuracy, qui peut être
+élevée simplement parce que les succès sont majoritaires.
+
 ## Étapes suivantes, en commits séparés
 
 1. Historique, découpage chronologique et baseline : implémentés.

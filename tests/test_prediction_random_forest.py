@@ -1,3 +1,4 @@
+import csv
 import tempfile
 import unittest
 from pathlib import Path
@@ -59,3 +60,21 @@ class RandomForestTests(unittest.TestCase):
             write_history([r | {"failed": 0} for r in generate_history(20)], path)
             with self.assertRaises(ValueError):
                 train(path, Path(directory) / "output", trees=5)
+
+    def test_validation_threshold_is_applied_to_future_rows(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "history.csv"
+            output = root / "model"
+            write_history(generate_history(60), source)
+            report = train(source, output, trees=5, evaluate_test=True)
+            point = report["operating_point"]
+            self.assertLessEqual(point["alert_rate"], 0.15)
+            self.assertTrue(report["test_evaluated"])
+            with (output / "test_predictions.csv").open(encoding="utf-8", newline="") as stream:
+                predictions = list(csv.DictReader(stream))
+            self.assertEqual(len(predictions), report["splits"]["test"]["rows"])
+            for row in predictions:
+                self.assertGreater(row["date"], report["splits"]["validation"]["end"])
+                self.assertEqual(int(row["selected_alert"]),
+                                 int(float(row["failure_score"]) >= point["threshold"]))

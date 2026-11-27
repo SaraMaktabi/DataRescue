@@ -19,6 +19,7 @@ from src.prediction.baseline import (
     chronological_split, classification_metrics, load_history, predict,
 )
 from src.prediction.generate_history import FEATURE_COLUMNS, write_history
+from src.prediction.tune_threshold import compare_thresholds
 
 
 def feature_frame(rows: list[dict]) -> pd.DataFrame:
@@ -59,9 +60,12 @@ def top_k_alerts(scores: list[float], budget: int) -> list[int]:
 
 def train(input_path: Path, output_dir: Path, seed: int = 42,
           trees: int = 200, *, model_kind: str = "random_forest",
-          xgb_parameters: dict | None = None) -> dict:
+          xgb_parameters: dict | None = None, max_alert_rate: float | None = None,
+          evaluate_test: bool = False) -> dict:
     if model_kind not in {"random_forest", "xgboost"}:
         raise ValueError("Modèle inconnu")
+    if evaluate_test and max_alert_rate is None:
+        max_alert_rate = 0.15
     if output_dir.exists():
         raise FileExistsError(f"Dossier existant : {output_dir}")
     splits = chronological_split(load_history(input_path))
@@ -116,15 +120,46 @@ def train(input_path: Path, output_dir: Path, seed: int = 42,
             "Probabilités non calibrées ; seuil 0.5 fixé sans optimisation.",
         ],
     }
+    test_predictions = []
+    if max_alert_rate is not None:
+        _, selected = compare_thresholds(labels, scores, max_alert_rate)
+        threshold = selected["threshold"]
+        report["operating_point"] = selected
+        report["max_validation_alert_rate"] = max_alert_rate
+        report["decision_rule"] = "failure_score >= operating_point.threshold"
+        if evaluate_test:
+            test = splits["test"]
+            test_scores = model.predict_proba(feature_frame(test))[:, 1].tolist()
+            test_labels = [row["failed"] for row in test]
+            test_baseline = [predict(row)["alert"] for row in test]
+            test_alerts = [int(score >= threshold) for score in test_scores]
+            report["test_evaluated"] = True
+            report["test"] = {
+                "selected_threshold": classification_metrics(test_labels, test_alerts),
+                "threshold_0_5": classification_metrics(
+                    test_labels, [int(score >= 0.5) for score in test_scores]),
+                "baseline": classification_metrics(test_labels, test_baseline),
+                "never_alert": classification_metrics(test_labels, [0] * len(test)),
+                "average_precision": float(average_precision_score(test_labels, test_scores))
+                if any(test_labels) else None,
+            }
+            test_predictions = [
+                {key: row[key] for key in ("date", "run_id", "task_id", "failed")}
+                | {"failure_score": score, "selected_alert": alert, "baseline_alert": baseline}
+                for row, score, alert, baseline in zip(test, test_scores, test_alerts, test_baseline)
+            ]
     output_dir.mkdir(parents=True, exist_ok=False)
     joblib.dump(model, output_dir / "model.joblib")
     write_history([
         {"run_id": row["run_id"], "date": row["date"], "task_id": row["task_id"],
          "failed": label, "failure_score": score, "alert_0_5": alert,
          "alert_same_budget": ranked, "baseline_alert": baseline}
+        | ({"selected_alert": int(score >= threshold)} if max_alert_rate is not None else {})
         for row, label, score, alert, ranked, baseline in
         zip(validation, labels, scores, rf_alerts, ranked_alerts, fixed_alerts)
     ], output_dir / "validation_predictions.csv")
+    if test_predictions:
+        write_history(test_predictions, output_dir / "test_predictions.csv")
     (output_dir / "report.json").write_text(
         json.dumps(report, indent=2, ensure_ascii=False, allow_nan=False) + "\n",
         encoding="utf-8",

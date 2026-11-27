@@ -52,6 +52,7 @@ class BaselineTests(unittest.TestCase):
         self.assertEqual(metrics["false_positives"], 1)
         self.assertEqual(metrics["false_negatives"], 1)
         self.assertEqual(metrics["true_negatives"], 2)
+        self.assertEqual(metrics["accuracy"], 0.6)
         self.assertEqual(metrics["precision"], 0.5)
         self.assertEqual(metrics["recall"], 0.5)
         self.assertEqual(metrics["f1"], 0.5)

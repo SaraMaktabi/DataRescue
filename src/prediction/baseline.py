@@ -114,6 +114,7 @@ def classification_metrics(labels: list[int], alerts: list[int]) -> dict:
     return {
         "rows": len(labels), "true_positives": tp, "false_positives": fp,
         "false_negatives": fn, "true_negatives": tn,
+        "accuracy": (tp + tn) / len(labels),
         "precision": tp / (tp + fp) if tp + fp else None,
         "recall": tp / (tp + fn) if tp + fn else None,
         "f1": 2 * tp / (2 * tp + fp + fn) if 2 * tp + fp + fn else None,

@@ -84,13 +84,15 @@ def select_parameters(rows: list[dict], seed: int = 42,
     }
 
 
-def search(input_path: Path, output_dir: Path, seed: int = 42) -> dict:
+def search(input_path: Path, output_dir: Path, seed: int = 42, *,
+           max_alert_rate: float = 0.15, evaluate_test: bool = False) -> dict:
     if output_dir.exists():
         raise FileExistsError(f"Dossier existant : {output_dir}")
     training = chronological_split(load_history(input_path))["train"]
     selection = select_parameters(training, seed)
     report = train(input_path, output_dir, seed, model_kind="xgboost",
-                   xgb_parameters=selection["selected_parameters"])
+                   xgb_parameters=selection["selected_parameters"],
+                   max_alert_rate=max_alert_rate, evaluate_test=evaluate_test)
     selection["input_sha256"] = report["input_sha256"]
     selection["test_evaluated"] = False
     (output_dir / "search_report.json").write_text(
@@ -104,16 +106,23 @@ def main() -> None:
     parser.add_argument("--input", type=Path, default=Path("data/prediction/history.csv"))
     parser.add_argument("--output-dir", type=Path, default=Path("data/prediction/xgb_search"))
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--max-alert-rate", type=float, default=0.15)
+    parser.add_argument("--evaluate-test", action="store_true")
     args = parser.parse_args()
     try:
-        report = search(args.input, args.output_dir, args.seed)
+        report = search(args.input, args.output_dir, args.seed,
+                        max_alert_rate=args.max_alert_rate, evaluate_test=args.evaluate_test)
     except (ValueError, OSError) as exc:
         parser.error(str(exc))
     print("Parametres retenus :", json.dumps(report["model_parameters"]))
     print("Average precision validation :", report["average_precision"])
     print("Meme budget :", json.dumps(report["xgboost_same_alert_count"]))
     print("Seuil 0.5 :", json.dumps(report["xgboost_threshold_0_5"]))
-    print("Test reserve, non evalue.")
+    print("Seuil valide :", json.dumps(report["operating_point"]))
+    if report["test_evaluated"]:
+        print("Test chronologique :", json.dumps(report["test"]))
+    else:
+        print("Test reserve, non evalue.")
 
 
 if __name__ == "__main__":
