@@ -24,6 +24,9 @@ data/scenarios/*
 
 # Historiques ML synthétiques (régénérables)
 data/prediction/
+frontend/node_modules/
+frontend/dist/
+frontend/.npm-cache/
 
 logs/
 *.log
